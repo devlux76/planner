@@ -5,6 +5,12 @@ description: Plan and track local AI work with the planner command over git-bug.
 
 # Planner
 
+Source: `~/projects/planner`; the installed skill paths link here. The CLI is
+`~/.local/bin/planner` and runtime state remains in `~/.local/state/planner`.
+Use `trailblazer trail "<question>" --repo ~/projects/planner --text` or Scout
+to inspect the code. Run its tests with
+`python3 -m unittest discover -s ~/projects/planner/scripts`.
+
 Planner owns planning and supervision through verified completion. Its job is to
 turn the operator's goal into executable steps, guide the worker, detect drift
 and blockers, and validate the result. The CLI and automatic selector are tools
