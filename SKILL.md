@@ -63,6 +63,13 @@ the coder has read/search tools, not git or shell access. Split broad tasks.
 does not generate a plan. The automatic brain selects work; its research route
 must produce implementation plans before coding.
 
+`--worktree /absolute/path` targets a registered linked worktree of the card's
+repository; that worktree's committed `HEAD` becomes the case base. Uncommitted
+edits are not copied. The main checkout itself, an unregistered copy, or a
+different repository is refused before transport. The exact worktree path and
+check need admission in both the local dispatch config and the Trailblazer peer
+policy; main-checkout admission does not cover a linked worktree.
+
 Set `--read-rounds N` (0..6, default6) to bound read/search exchanges before
 forced native edits. For a fully resolved plan that needs no further code
 discovery, use zero so the first coder call must submit edits. This is separate
@@ -85,6 +92,14 @@ token-limit failure stops without an unchanged automatic retry. Any failed or
 uncertain stage stops the launcher; inspect its recorded
 assignment and profile before retrying. Keep supervising until cap cleanup and
 independent verification are confirmed.
+
+Before binding an admitted case, a launcher failure releases only its own
+unbound profile. It never erases another launcher's profile or one bound to a
+case. Once admission succeeds, a failed bind/observer launch needs explicit
+reconciliation; it does not cancel the worker or authorize another assignment.
+The native cleanup observer polls durable case status without model calls and
+releases that case's dispatch profile after it closes; it does not remove Git
+worktrees, merge candidates, or replace the Companion's independent verification.
 
 If a completed failed case contains an unapplied but schema-valid JSON reply,
 explicit recovery can use `--replay-reply-from CASE` on `assign` or the checked
@@ -114,6 +129,13 @@ retries a blocked job, and a released card cannot be reassigned while its prior
 case is still open. An unconfirmed admission needs explicit reconciliation.
 Only repository/check pairs admitted by the local dispatch configuration may
 run; Trailblazer self-repair remains forbidden.
+
+After proving a previous request never admitted a case and releasing its card,
+`--confirmed-unadmitted 'EVIDENCE'` can retire that case-less assignment. It
+preserves the prior identity and evidence in history. It refuses blank evidence,
+no previous attempt, an unreleased card, or a previous assignment with a case. A
+timeout alone proves nothing: this flag is not permission to bypass an uncertain
+admission or an open case.
 
 Start with `resume` after compaction. Read one card before acting. Use `git -C <repo> bug bug show <id>` if the bounded card omits needed detail. Work on one active card per actor; block or release it before taking another. A blocker retains task ownership but frees the actor for other work. Select ready work within the operator's authorized scope; priority alone is not permission to revive parked work.
 
