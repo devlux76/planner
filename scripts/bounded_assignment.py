@@ -1,5 +1,6 @@
 """Checked launch with explicit token budgets and observation through completion."""
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -48,7 +49,9 @@ case :persistent_term.get(key, nil) do
     unless record.task["reasoning_budget_tokens"] == __THINKING__, do: raise("thinking budget mismatch")
     unless "__REPLAY__" == "" or record.task["replay_reply_from"] == "__REPLAY__",
       do: raise("replay source mismatch")
-    unless "__REPO__" == "" or record.task["repo"] == "__REPO__",
+    # The target path is data, never Elixir source: it arrives base64-encoded.
+    target = Base.decode64!("__REPO_B64__")
+    unless target == "" or record.task["repo"] == target,
       do: raise("target worktree mismatch")
     :persistent_term.put(key, %{profile | case: id})
     :ok = Trailblazer.Planner.Companion.observe(id)
@@ -57,6 +60,15 @@ case :persistent_term.get(key, nil) do
 end
 IO.puts("exact case bound")
 '''
+
+
+def bind_program(case, owner, read_rounds, reasoning_tokens, replay_reply_from, target):
+    """BIND with its values. Case, owner and replay are validated identifiers and the
+    budgets are ints; the free-form target path is passed only as base64 data."""
+    encoded = base64.b64encode(target.encode()).decode()
+    return (BIND.replace("__CASE__", case).replace("__OWNER__", owner)
+            .replace("__ROUNDS__", str(read_rounds)).replace("__THINKING__", str(reasoning_tokens))
+            .replace("__REPLAY__", replay_reply_from or "").replace("__REPO_B64__", encoded))
 
 
 def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=None, worktree=None):
@@ -97,8 +109,7 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
     if result.get("dispatched") is not True or not re.fullmatch(r"vortex-[0-9a-f]{64}", case):
         raise ValueError("fresh admission not confirmed; reconcile existing assignment/profile")
     print(json.dumps({"admitted_case": case}), file=sys.stderr, flush=True)
-    code = BIND.replace("__CASE__", case).replace("__OWNER__", owner).replace("__ROUNDS__", str(read_rounds)).replace("__THINKING__", str(reasoning_tokens)).replace("__REPLAY__", replay_reply_from or "").replace("__REPO__", target)
-    run([str(RELEASE), "rpc", code])
+    run([str(RELEASE), "rpc", bind_program(case, owner, read_rounds, reasoning_tokens, replay_reply_from, target)])
     unit = "trailblazer-cleanup-" + case.removeprefix("vortex-")[:12]
     run([str(SYSTEMD_RUN), "--user", "--unit=" + unit, "--collect", "--property=Type=exec",
          sys.executable, str(CLEANUP), case])

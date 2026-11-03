@@ -90,7 +90,20 @@ if op=='assign': print(json.dumps({'case':'vortex-'+('a'*64),'dispatched':True})
         bounded.launch("opencode:1234567", "check", [], 0, 1024, None, str(tree))
         args=json.loads((Path(self.tmp.name)/"assign-args.json").read_text())
         self.assertEqual(args[args.index("--worktree")+1], str(tree.resolve()))
-        self.assertIn('record.task["repo"] == "__REPO__"', bounded.BIND)
+        self.assertIn("Base.decode64!", bounded.BIND)
+
+    def test_hostile_worktree_path_stays_data_in_the_bind_program(self):
+        hostile = '/tmp/a"b\\c#{System.halt(7)}d'
+        code = bounded.bind_program("vortex-" + "a" * 64, "f" * 32, 0, 1024, None, hostile)
+        self.assertNotIn(hostile, code)
+        root = Path(self.tmp.name)
+        (root/"bind.exs").write_text(code)
+        # It parses, and the decoded literal is exactly the path: no interpolation runs.
+        probe = ('{:ok, ast} = Code.string_to_quoted(File.read!(hd(System.argv())));'
+                 ' {_, [v]} = Macro.prewalk(ast, [], fn {{:., _, [{:__aliases__, _, [:Base]}, :decode64!]}, _, [s]} = n, _ -> {n, [Base.decode64!(s)]}; n, acc -> {n, acc} end);'
+                 ' IO.write(v)')
+        out = subprocess.run(["elixir", "-e", probe, str(root/"bind.exs")], check=True, capture_output=True, text=True)
+        self.assertEqual(out.stdout, hostile)
 
     def test_rpc_programs_parse_before_any_live_operation(self):
         root = Path(self.tmp.name)
