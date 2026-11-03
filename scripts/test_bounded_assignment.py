@@ -22,7 +22,7 @@ import json,pathlib,sys
 root=pathlib.Path(__file__).parent
 op=sys.argv[1]
 if 'assign' in sys.argv: op='assign'
-if op=='rpc': op='bind' if 'CaseRecord.event' in sys.argv[2] else 'prepare'
+if op=='rpc': op='bind' if 'CaseRecord.event' in sys.argv[2] else ('release' if 'persistent_term.erase' in sys.argv[2] else 'prepare')
 with (root/'events').open('a') as f: f.write(op+'\\n')
 if (root/'fail').exists() and (root/'fail').read_text()==op: sys.exit(2)
 if op=='assign': (root/'assign-args.json').write_text(json.dumps(sys.argv[1:]))
@@ -51,7 +51,7 @@ if op=='assign': print(json.dumps({'case':'vortex-'+('a'*64),'dispatched':True})
         self.fail.write_text("assign")
         with self.assertRaises(subprocess.CalledProcessError):
             self.launch()
-        self.assertEqual(self.events.read_text().splitlines(), ["prepare", "assign"])
+        self.assertEqual(self.events.read_text().splitlines(), ["prepare", "assign", "release"])
 
     def test_success_binds_the_admitted_case_before_starting_its_watchdog(self):
         result = self.launch()

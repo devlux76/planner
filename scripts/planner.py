@@ -90,6 +90,8 @@ def main():
     assign.add_argument("--reasoning-tokens", type=int,
                         help="explicit thinking budget; must leave room within the response cap")
     assign.add_argument("--replay-reply-from", help="recover a closed failed case reply without coding inference")
+    assign.add_argument("--confirmed-unadmitted", metavar="EVIDENCE",
+                        help="retire a released card's case-less previous assignment, with evidence that no case was admitted")
     assign.add_argument("--worktree", type=Path,
                         help="a registered git worktree of the card's repository to work in; its HEAD is the base")
     assign.add_argument("--dispatch-config", type=Path,
@@ -181,9 +183,20 @@ def main():
             if previous:
                 job = json.loads(previous[0])
                 if claim and claim["state"] == "todo":
-                    assignment.confirm_closed(job, assignment.configuration(a.dispatch_config))
-                    history = job.get("previous", [])+[{
-                        key: job[key] for key in ("id", "state", "case", "commit", "reason") if key in job}]
+                    record = {key: job[key] for key in ("id", "state", "case", "commit", "reason") if key in job}
+                    if a.confirmed_unadmitted is not None:
+                        # A refused or timed-out request never got a case. Only an explicit,
+                        # evidenced confirmation that nothing was admitted retires it.
+                        if job.get("case"):
+                            raise ValueError("--confirmed-unadmitted applies only to an assignment without a case")
+                        if not a.confirmed_unadmitted.strip():
+                            raise ValueError("--confirmed-unadmitted needs the evidence that no case was admitted")
+                        record |= {"state": "unadmitted", "evidence": a.confirmed_unadmitted.strip()}
+                    else:
+                        assignment.confirm_closed(job, assignment.configuration(a.dispatch_config))
+                    history = job.get("previous", [])+[record]
+                elif a.confirmed_unadmitted is not None:
+                    raise ValueError("--confirmed-unadmitted needs a released card whose last assignment has no case")
                 else:
                     if job["repo"] != str(target) or job["check"] != a.check or job["files"] != a.file or job.get("read_rounds") != a.read_rounds or job.get("reasoning_budget_tokens") != a.reasoning_tokens or job.get("replay_reply_from") != a.replay_reply_from:
                         raise ValueError("assignment already exists with different inputs; reconcile it first")

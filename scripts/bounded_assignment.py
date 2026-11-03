@@ -62,6 +62,15 @@ IO.puts("exact case bound")
 '''
 
 
+RELEASE_PROFILE = '''
+key = {:trailblazer, :bounded_smoke_profile}
+case :persistent_term.get(key, nil) do
+  %{owner_ref: "__OWNER__", case: nil} -> :persistent_term.erase(key); IO.puts("released")
+  _ -> IO.puts("not owned")
+end
+'''
+
+
 def bind_program(case, owner, read_rounds, reasoning_tokens, replay_reply_from, target):
     """BIND with its values. Case, owner and replay are validated identifiers and the
     budgets are ints; the free-form target path is passed only as base64 data."""
@@ -71,7 +80,8 @@ def bind_program(case, owner, read_rounds, reasoning_tokens, replay_reply_from, 
             .replace("__REPLAY__", replay_reply_from or "").replace("__REPO_B64__", encoded))
 
 
-def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=None, worktree=None):
+def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=None, worktree=None,
+           confirmed_unadmitted=None):
     if type(read_rounds) is not int or not 0 <= read_rounds <= 6:
         raise ValueError("read_rounds must be 0..6")
     if type(reasoning_tokens) is not int or reasoning_tokens < 0:
@@ -104,10 +114,21 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
         argv += ["--replay-reply-from", replay_reply_from]
     if target:
         argv += ["--worktree", target]
-    result = json.loads(run(argv, timeout=90).stdout)
-    case = result["case"]
-    if result.get("dispatched") is not True or not re.fullmatch(r"vortex-[0-9a-f]{64}", case):
-        raise ValueError("fresh admission not confirmed; reconcile existing assignment/profile")
+    if confirmed_unadmitted is not None:
+        argv += ["--confirmed-unadmitted", confirmed_unadmitted]
+    try:
+        result = json.loads(run(argv, timeout=90).stdout)
+        case = result["case"]
+        if result.get("dispatched") is not True or not isinstance(case, str) or not re.fullmatch(r"vortex-[0-9a-f]{64}", case):
+            raise ValueError("fresh admission not confirmed; reconcile existing assignment/profile")
+    except BaseException:
+        # No case was bound to this run's profile: release only our own unbound profile, so
+        # a refusal before admission never blocks the next launch. Then report as before.
+        try:
+            run([str(RELEASE), "rpc", RELEASE_PROFILE.replace("__OWNER__", owner)])
+        except (OSError, subprocess.SubprocessError):
+            pass
+        raise
     print(json.dumps({"admitted_case": case}), file=sys.stderr, flush=True)
     run([str(RELEASE), "rpc", bind_program(case, owner, read_rounds, reasoning_tokens, replay_reply_from, target)])
     unit = "trailblazer-cleanup-" + case.removeprefix("vortex-")[:12]
@@ -125,9 +146,12 @@ if __name__ == "__main__":
     parser.add_argument("--reasoning-tokens", type=int, required=True)
     parser.add_argument("--replay-reply-from")
     parser.add_argument("--worktree", help="registered worktree of the card's repository; its HEAD is the case base")
+    parser.add_argument("--confirmed-unadmitted", metavar="EVIDENCE",
+                        help="retire the card's case-less previous assignment, with evidence nothing was admitted")
     args = parser.parse_args()
     try:
-        print(json.dumps(launch(args.ref, args.check, args.file, args.read_rounds, args.reasoning_tokens, args.replay_reply_from, args.worktree)))
+        print(json.dumps(launch(args.ref, args.check, args.file, args.read_rounds, args.reasoning_tokens,
+                                args.replay_reply_from, args.worktree, args.confirmed_unadmitted)))
     except (ValueError, OSError, subprocess.SubprocessError, KeyError) as error:
         detail = error.stderr if isinstance(error, subprocess.CalledProcessError) else str(error)
         print(json.dumps({"error": "Launch stopped. Reconcile the recorded assignment/profile before retrying.",
