@@ -48,6 +48,8 @@ case :persistent_term.get(key, nil) do
     unless record.task["reasoning_budget_tokens"] == __THINKING__, do: raise("thinking budget mismatch")
     unless "__REPLAY__" == "" or record.task["replay_reply_from"] == "__REPLAY__",
       do: raise("replay source mismatch")
+    unless "__REPO__" == "" or record.task["repo"] == "__REPO__",
+      do: raise("target worktree mismatch")
     :persistent_term.put(key, %{profile | case: id})
     :ok = Trailblazer.Planner.Companion.observe(id)
     :ok = Trailblazer.Loop.CaseRecord.event(id, :attempt, %{stage: :supervision_policy, max_tokens: profile.output_cap, check_interval_seconds: 1800, read_rounds: __ROUNDS__, reasoning_budget_tokens: __THINKING__})
@@ -57,13 +59,20 @@ IO.puts("exact case bound")
 '''
 
 
-def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=None):
+def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=None, worktree=None):
     if type(read_rounds) is not int or not 0 <= read_rounds <= 6:
         raise ValueError("read_rounds must be 0..6")
     if type(reasoning_tokens) is not int or reasoning_tokens < 0:
         raise ValueError("reasoning tokens must be nonnegative")
     if replay_reply_from is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9:._-]{0,127}", replay_reply_from):
         raise ValueError("invalid replay reply case")
+    target = ""
+    if worktree is not None:
+        path = Path(worktree).expanduser()
+        if not path.is_absolute() or not path.is_dir():
+            raise ValueError("worktree must be an existing absolute directory")
+        # planner assign checks registration and admission; bind checks the admitted case uses it.
+        target = str(path.resolve())
     if not CLEANUP.is_file():
         raise ValueError("native cleanup observer missing; no admission attempted")
     env = os.environ | {"RELEASE_DISTRIBUTION": "name", "RELEASE_NODE": "trailblazer@127.0.0.1",
@@ -81,12 +90,14 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
         argv += ["--file", path]
     if replay_reply_from is not None:
         argv += ["--replay-reply-from", replay_reply_from]
+    if target:
+        argv += ["--worktree", target]
     result = json.loads(run(argv, timeout=90).stdout)
     case = result["case"]
     if result.get("dispatched") is not True or not re.fullmatch(r"vortex-[0-9a-f]{64}", case):
         raise ValueError("fresh admission not confirmed; reconcile existing assignment/profile")
     print(json.dumps({"admitted_case": case}), file=sys.stderr, flush=True)
-    code = BIND.replace("__CASE__", case).replace("__OWNER__", owner).replace("__ROUNDS__", str(read_rounds)).replace("__THINKING__", str(reasoning_tokens)).replace("__REPLAY__", replay_reply_from or "")
+    code = BIND.replace("__CASE__", case).replace("__OWNER__", owner).replace("__ROUNDS__", str(read_rounds)).replace("__THINKING__", str(reasoning_tokens)).replace("__REPLAY__", replay_reply_from or "").replace("__REPO__", target)
     run([str(RELEASE), "rpc", code])
     unit = "trailblazer-cleanup-" + case.removeprefix("vortex-")[:12]
     run([str(SYSTEMD_RUN), "--user", "--unit=" + unit, "--collect", "--property=Type=exec",
@@ -102,9 +113,10 @@ if __name__ == "__main__":
     parser.add_argument("--read-rounds", type=int, required=True)
     parser.add_argument("--reasoning-tokens", type=int, required=True)
     parser.add_argument("--replay-reply-from")
+    parser.add_argument("--worktree", help="registered worktree of the card's repository; its HEAD is the case base")
     args = parser.parse_args()
     try:
-        print(json.dumps(launch(args.ref, args.check, args.file, args.read_rounds, args.reasoning_tokens, args.replay_reply_from)))
+        print(json.dumps(launch(args.ref, args.check, args.file, args.read_rounds, args.reasoning_tokens, args.replay_reply_from, args.worktree)))
     except (ValueError, OSError, subprocess.SubprocessError, KeyError) as error:
         detail = error.stderr if isinstance(error, subprocess.CalledProcessError) else str(error)
         print(json.dumps({"error": "Launch stopped. Reconcile the recorded assignment/profile before retrying.",

@@ -81,6 +81,17 @@ if op=='assign': print(json.dumps({'case':'vortex-'+('a'*64),'dispatched':True})
         args=json.loads((Path(self.tmp.name)/"assign-args.json").read_text())
         self.assertEqual(args[args.index("--replay-reply-from")+1], "source-case")
 
+    def test_worktree_is_forwarded_and_bound_and_bad_paths_cannot_prepare(self):
+        for bad in ["relative/path", str(Path(self.tmp.name)/"missing")]:
+            with self.assertRaises(ValueError):
+                bounded.launch("opencode:1234567", "check", [], 0, 1024, None, bad)
+        self.assertFalse(self.events.exists())
+        tree = Path(self.tmp.name)/"tree"; tree.mkdir()
+        bounded.launch("opencode:1234567", "check", [], 0, 1024, None, str(tree))
+        args=json.loads((Path(self.tmp.name)/"assign-args.json").read_text())
+        self.assertEqual(args[args.index("--worktree")+1], str(tree.resolve()))
+        self.assertIn('record.task["repo"] == "__REPO__"', bounded.BIND)
+
     def test_rpc_programs_parse_before_any_live_operation(self):
         root = Path(self.tmp.name)
         paths = []
