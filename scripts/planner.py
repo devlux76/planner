@@ -179,6 +179,8 @@ def main():
                 raise ValueError("invalid replay reply case")
             target = assignment.worktree_target(repo, a.worktree) if a.worktree is not None else repo
             previous = db.execute("SELECT data FROM assignments WHERE ref=?", (ref,)).fetchone()
+            if a.confirmed_unadmitted is not None and not previous:
+                raise ValueError("--confirmed-unadmitted needs a previous assignment without a case")
             history = []
             if previous:
                 job = json.loads(previous[0])

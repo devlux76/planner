@@ -15,7 +15,7 @@ class BoundedAssignmentTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         self.events = root / "events"
-        self.fail = root / "fail"
+        self.fail_file = root / "fail"
         driver = root / "driver"
         driver.write_text('''#!/usr/bin/env python3
 import json,pathlib,sys
@@ -26,8 +26,8 @@ if op=='rpc': op='bind' if 'CaseRecord.event' in sys.argv[2] else ('release' if 
 with (root/'events').open('a') as f: f.write(op+'\\n')
 if (root/'fail').exists() and (root/'fail').read_text()==op: sys.exit(2)
 if op=='assign': (root/'assign-args.json').write_text(json.dumps(sys.argv[1:]))
-if op=='prepare': print(json.dumps({'output_cap':16384}))
-if op=='assign': print(json.dumps({'case':'vortex-'+('a'*64),'dispatched':True}))
+if op=='prepare': print((root/'prepare-reply').read_text() if (root/'prepare-reply').exists() else json.dumps({'output_cap':16384}))
+if op=='assign': print((root/'assign-reply').read_text() if (root/'assign-reply').exists() else json.dumps({'case':'vortex-'+('a'*64),'dispatched':True}))
 ''')
         driver.chmod(0o700)
         watchdog = root / "watchdog.py"
@@ -42,13 +42,13 @@ if op=='assign': print(json.dumps({'case':'vortex-'+('a'*64),'dispatched':True})
         return bounded.launch("opencode:1234567", "check", ["a.ts"], 0, 1024)
 
     def test_failed_preparation_cannot_dispatch(self):
-        self.fail.write_text("prepare")
+        self.fail_file.write_text("prepare")
         with self.assertRaises(subprocess.CalledProcessError):
             self.launch()
-        self.assertEqual(self.events.read_text().splitlines(), ["prepare"])
+        self.assertEqual(self.events.read_text().splitlines(), ["prepare", "release"])
 
     def test_uncertain_admission_is_never_retried_or_followed_by_a_watchdog(self):
-        self.fail.write_text("assign")
+        self.fail_file.write_text("assign")
         with self.assertRaises(subprocess.CalledProcessError):
             self.launch()
         self.assertEqual(self.events.read_text().splitlines(), ["prepare", "assign", "release"])
@@ -61,6 +61,40 @@ if op=='assign': print(json.dumps({'case':'vortex-'+('a'*64),'dispatched':True})
         self.assertEqual(result["reasoning_budget_tokens"], 1024)
         self.assertEqual(result["output_cap"], 16384)
         self.assertEqual(self.events.read_text().splitlines(), ["prepare", "assign", "bind", "--user"])
+
+    def test_confirmation_evidence_is_forwarded_unchanged(self):
+        bounded.launch("opencode:1234567", "check", [], 0, 1024,
+                       confirmed_unadmitted="journal: refused; no case")
+        args=json.loads((Path(self.tmp.name)/"assign-args.json").read_text())
+        self.assertEqual(args[args.index("--confirmed-unadmitted")+1],"journal: refused; no case")
+
+    def test_malformed_admission_response_releases_only_unbound_profile(self):
+        (Path(self.tmp.name)/"assign-reply").write_text('{"case": null, "dispatched": true}')
+        with self.assertRaises(ValueError):self.launch()
+        self.assertEqual(self.events.read_text().splitlines(),["prepare","assign","release"])
+
+    def test_malformed_preparation_response_also_releases_owned_profile(self):
+        (Path(self.tmp.name)/"prepare-reply").write_text('not JSON')
+        with self.assertRaises(ValueError):self.launch()
+        self.assertEqual(self.events.read_text().splitlines(),["prepare","release"])
+
+    def test_cleanup_never_releases_another_owner_or_a_bound_profile(self):
+        source=bounded.RELEASE_PROFILE.replace("__OWNER__","mine")
+        probe='''
+key = {:trailblazer, :bounded_smoke_profile}
+for profile <- [%{owner_ref: "mine", case: nil}, %{owner_ref: "other", case: nil}, %{owner_ref: "mine", case: "admitted"}] do
+  :persistent_term.put(key, profile)
+  Code.eval_string(hd(System.argv()))
+  expected = if profile == %{owner_ref: "mine", case: nil}, do: nil, else: profile
+  unless :persistent_term.get(key, nil) == expected, do: raise("wrong profile released")
+end
+'''
+        subprocess.run(["elixir","-e",probe,source],check=True,capture_output=True,text=True)
+
+    def test_failure_after_admission_does_not_release_the_profile(self):
+        self.fail_file.write_text("bind")
+        with self.assertRaises(subprocess.CalledProcessError):self.launch()
+        self.assertEqual(self.events.read_text().splitlines(),["prepare","assign","bind"])
 
     def test_thinking_budget_cannot_consume_the_entire_reply(self):
         for budget in [-1, True]:

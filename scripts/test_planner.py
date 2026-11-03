@@ -323,6 +323,45 @@ elif op in ('read','wait'):
         self.assign(ref)
         self.assertEqual(len((self.root/"sent").read_text().splitlines()),1)
 
+    def rejected_and_released(self):
+        ref=self.card()
+        self.dispatch_fixture(ref)
+        (self.root/"reject").touch()
+        self.assign(ref,ok=False)
+        self.call("release",ref,"confirmed refusal",actor="trailblazer")
+        (self.root/"reject").unlink()
+        return ref
+
+    def test_confirmed_unadmitted_preserves_evidence_and_old_attempt(self):
+        ref=self.rejected_and_released()
+        old=json.loads((self.root/"task.json").read_text())["request_id"]
+        result=self.assign(ref,extra=("--confirmed-unadmitted","journal: unauthorized_task; no case"))
+        self.assertNotEqual(result["assignment"],old)
+        with sqlite3.connect(self.root/"state"/"board.sqlite3") as db:
+            job=json.loads(db.execute("SELECT data FROM assignments WHERE ref=?",(ref,)).fetchone()[0])
+        self.assertEqual(job["previous"][-1]["id"],old)
+        self.assertEqual(job["previous"][-1]["state"],"unadmitted")
+        self.assertEqual(job["previous"][-1]["evidence"],"journal: unauthorized_task; no case")
+
+    def test_uncertain_retry_requires_nonempty_evidence(self):
+        ref=self.rejected_and_released()
+        self.assertIn("uncertain",self.assign(ref,ok=False)["error"])
+        self.assertIn("evidence",self.assign(ref,ok=False,extra=("--confirmed-unadmitted","  "))["error"])
+        self.assertEqual(len((self.root/"sent").read_text().splitlines()),1)
+
+    def test_confirmed_unadmitted_refuses_admitted_case_or_unreleased_card(self):
+        ref=self.card();self.dispatch_fixture(ref);self.assign(ref)
+        self.assertIn("released",self.assign(ref,ok=False,extra=("--confirmed-unadmitted","evidence"))["error"])
+        self.call("block",ref,"terminal",actor="trailblazer")
+        self.call("release",ref,"deliberate retry",actor="trailblazer")
+        self.assertIn("without a case",self.assign(ref,ok=False,extra=("--confirmed-unadmitted","evidence"))["error"])
+        self.assertEqual(len((self.root/"sent").read_text().splitlines()),1)
+
+    def test_confirmed_unadmitted_requires_a_previous_attempt(self):
+        ref=self.card();self.dispatch_fixture(ref)
+        self.assertIn("previous",self.assign(ref,ok=False,extra=("--confirmed-unadmitted","evidence"))["error"])
+        self.assertFalse((self.root/"sent").exists())
+
     def test_no_admission_blocks_at_client_timeout_without_leaving_a_watcher(self):
         ref=self.card()
         self.dispatch_fixture(ref)

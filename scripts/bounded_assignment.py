@@ -102,8 +102,17 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
                         "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{os.getuid()}/bus"}
     def run(argv, timeout=40):
         return subprocess.run(argv, check=True, capture_output=True, text=True, env=env, cwd=ROOT, timeout=timeout)
+    def release_unbound():
+        try:
+            run([str(RELEASE), "rpc", RELEASE_PROFILE.replace("__OWNER__", owner)])
+        except (OSError, subprocess.SubprocessError):
+            pass
     owner = uuid.uuid4().hex
-    prepared = json.loads(run([str(RELEASE), "rpc", PREPARE.replace("__OWNER__", owner).replace("__THINKING__", str(reasoning_tokens))]).stdout)
+    try:
+        prepared = json.loads(run([str(RELEASE), "rpc", PREPARE.replace("__OWNER__", owner).replace("__THINKING__", str(reasoning_tokens))]).stdout)
+    except BaseException:
+        release_unbound()
+        raise
     # A failed preparation raises above: it cannot fall through to admission.
     argv = [str(PLANNER), "--actor", "codex", "assign", ref, "trailblazer", "--check", check,
             "--read-rounds", str(read_rounds),
@@ -124,10 +133,7 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
     except BaseException:
         # No case was bound to this run's profile: release only our own unbound profile, so
         # a refusal before admission never blocks the next launch. Then report as before.
-        try:
-            run([str(RELEASE), "rpc", RELEASE_PROFILE.replace("__OWNER__", owner)])
-        except (OSError, subprocess.SubprocessError):
-            pass
+        release_unbound()
         raise
     print(json.dumps({"admitted_case": case}), file=sys.stderr, flush=True)
     run([str(RELEASE), "rpc", bind_program(case, owner, read_rounds, reasoning_tokens, replay_reply_from, target)])
