@@ -196,6 +196,46 @@ elif op in ('read','wait'):
         self.assertEqual(self.call("show",ref)["column"],"doing")
         self.assertFalse((self.root/"followed").exists())
 
+    def side_worktree(self, admit=True):
+        tree=self.root/"side"
+        self.run_git("worktree","add","-q","-b","side",str(tree))
+        subprocess.run(["git","-C",str(tree),"commit","-q","--allow-empty","-m","Side work"],check=True)
+        head=subprocess.run(["git","-C",str(tree),"rev-parse","HEAD"],check=True,capture_output=True,text=True).stdout.strip()
+        if admit:
+            config=json.loads(self.config.read_text())
+            config["repos"][str(tree.resolve())]=["test -f value"]
+            self.config.write_text(json.dumps(config))
+        return tree,head
+
+    def test_assignment_targets_a_registered_worktree_and_records_its_base(self):
+        ref=self.card()
+        self.dispatch_fixture(ref)
+        tree,head=self.side_worktree()
+        result=self.assign(ref,extra=("--worktree",str(tree)))
+        self.assertEqual(result["case"],"fixture-case")
+        task=json.loads((self.root/"sent").read_text().splitlines()[0])
+        self.assertEqual(task["payload"]["repo"],str(tree.resolve()))
+        notes=self.call("show",ref)["recent"]
+        self.assertTrue(any(head in n and "case base" in n for n in notes),notes)
+        # Same card, different target: refused as different inputs, nothing re-sent.
+        self.assertIn("different inputs",self.assign(ref,ok=False)["error"])
+        self.assertEqual(len((self.root/"sent").read_text().splitlines()),1)
+
+    def test_assignment_refuses_an_unregistered_worktree_or_the_repository_itself(self):
+        ref=self.card()
+        self.dispatch_fixture(ref)
+        stray=self.root/"stray"; stray.mkdir()
+        self.assertIn("not a registered worktree",self.assign(ref,ok=False,extra=("--worktree",str(stray)))["error"])
+        self.assertIn("card repository itself",self.assign(ref,ok=False,extra=("--worktree",str(self.repo)))["error"])
+        self.assertFalse((self.root/"sent").exists())
+
+    def test_assignment_worktree_still_needs_its_own_admission(self):
+        ref=self.card()
+        self.dispatch_fixture(ref)
+        tree,_=self.side_worktree(admit=False)
+        self.assertIn("not admitted",self.assign(ref,ok=False,extra=("--worktree",str(tree)))["error"])
+        self.assertFalse((self.root/"sent").exists())
+
     def test_assignment_is_idempotent_before_and_after_elixir_completion(self):
         ref=self.card()
         self.dispatch_fixture(ref)

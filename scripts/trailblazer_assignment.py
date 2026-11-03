@@ -20,6 +20,27 @@ def configuration(path):
     return value
 
 
+def worktree_target(repo, path):
+    """A registered worktree of `repo` other than its main checkout; its HEAD becomes the case base."""
+    target = Path(path).expanduser().resolve()
+    listed = subprocess.run(["git", "-C", str(repo), "worktree", "list", "--porcelain"], capture_output=True, text=True)
+    if listed.returncode:
+        raise ValueError("cannot list the card repository's worktrees")
+    paths = [Path(line[len("worktree "):]).resolve() for line in listed.stdout.splitlines() if line.startswith("worktree ")]
+    if target == Path(repo).resolve():
+        raise ValueError("--worktree names the card repository itself; omit it")
+    if target not in paths:
+        raise ValueError("--worktree is not a registered worktree of the card repository")
+    return target
+
+
+def head(repo):
+    out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True)
+    if out.returncode:
+        raise ValueError("cannot resolve the target worktree HEAD")
+    return out.stdout.strip()
+
+
 def validate(repo, check, files, config):
     if check not in config.get("repos", {}).get(str(repo), []):
         raise ValueError("repository/check is not admitted in the local dispatch configuration")

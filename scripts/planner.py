@@ -90,6 +90,8 @@ def main():
     assign.add_argument("--reasoning-tokens", type=int,
                         help="explicit thinking budget; must leave room within the response cap")
     assign.add_argument("--replay-reply-from", help="recover a closed failed case reply without coding inference")
+    assign.add_argument("--worktree", type=Path,
+                        help="a registered git worktree of the card's repository to work in; its HEAD is the base")
     assign.add_argument("--dispatch-config", type=Path,
                         default=Path.home()/".config/planner/trailblazer.json")
     add = sub.add_parser("add")
@@ -173,6 +175,7 @@ def main():
                 raise ValueError("reasoning budget must be nonnegative")
             if a.replay_reply_from is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9:._-]{0,127}",a.replay_reply_from):
                 raise ValueError("invalid replay reply case")
+            target = assignment.worktree_target(repo, a.worktree) if a.worktree is not None else repo
             previous = db.execute("SELECT data FROM assignments WHERE ref=?", (ref,)).fetchone()
             history = []
             if previous:
@@ -182,7 +185,7 @@ def main():
                     history = job.get("previous", [])+[{
                         key: job[key] for key in ("id", "state", "case", "commit", "reason") if key in job}]
                 else:
-                    if job["check"] != a.check or job["files"] != a.file or job.get("read_rounds") != a.read_rounds or job.get("reasoning_budget_tokens") != a.reasoning_tokens or job.get("replay_reply_from") != a.replay_reply_from:
+                    if job["repo"] != str(target) or job["check"] != a.check or job["files"] != a.file or job.get("read_rounds") != a.read_rounds or job.get("reasoning_budget_tokens") != a.reasoning_tokens or job.get("replay_reply_from") != a.replay_reply_from:
                         raise ValueError("assignment already exists with different inputs; reconcile it first")
                     return {"ref": ref, "assignment": job["id"], "case": job.get("case"), "column": column(b), "dispatched": False}
             if name == "shared":
@@ -196,14 +199,17 @@ def main():
             if any(r["actor"] == "trailblazer" and r["state"] == "doing" for r in claims.values()):
                 raise ValueError("trailblazer already has active work")
             config = assignment.configuration(a.dispatch_config)
-            assignment.validate(repo, a.check, a.file, config)
+            assignment.validate(target, a.check, a.file, config)
             seconds = a.deadline_seconds if a.deadline_seconds is not None else config["deadline_seconds"]
             if seconds <= 0:
                 raise ValueError("deadline_seconds must be positive")
             plan = assignment.implementation_plan(b)
             notes = json.loads(claim["notes"]) if claim else []
             notes.append({"n": len(notes)+1, "action": "assign", "text": plan})
-            job = {"id": "planner-"+uuid.uuid4().hex, "ref": ref, "repo": str(repo),
+            if target != repo:
+                notes.append({"n": len(notes)+1, "action": "note",
+                              "text": f"Target worktree {target} at {assignment.head(target)}; that HEAD is the case base."})
+            job = {"id": "planner-"+uuid.uuid4().hex, "ref": ref, "repo": str(target),
                    "check": a.check, "files": a.file, "state": "admitting", "previous": history,
                    "deadline_seconds": seconds, "read_rounds": a.read_rounds, "plan": plan,
                    "reasoning_budget_tokens": a.reasoning_tokens,
