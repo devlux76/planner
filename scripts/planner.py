@@ -279,18 +279,31 @@ def main():
                 if claim["state"] == target and last["action"] == a.command and last["text"] == text:
                     mirror(repo, bug, b, claim)
                     return {"ref": ref, "column": target, "actor": a.actor, "recorded": "sync"}
-            if not claim or claim["actor"] != a.actor or claim["state"] not in ("doing", "blocked"):
-                raise ValueError("start this card first; only its current actor may update it")
-            plan = claim["plan"]
+            owner = claim["actor"] if claim and claim["state"] in ("doing", "blocked") else None
+            if a.command == "note" and owner != a.actor:
+                # Ownership prevents duplicate work; it never blocks cooperation.
+                # Anyone who can reach this card may add a labelled comment that
+                # leaves the claim, owner and column untouched.
+                if not text.strip():
+                    raise ValueError("note must not be empty")
+                git(repo, "bug", "comment", "new", bug, "-m",
+                    f"planner note ({a.actor}) cooperative: {text}", "--non-interactive")
+                return {"ref": ref, "column": column(b), "actor": a.actor, "owner": owner, "recorded": "note"}
+            # Cooperation is allowed: any actor may block, release or complete a
+            # card (planner only refuses to hand the same task out twice, at
+            # start/assign). The owner of record is kept; the mirror names the author.
+            plan = claim["plan"] if claim else ""
             if not text.strip():
                 raise ValueError("checkpoint, reason or evidence must not be empty")
             state = {"note": claim["state"], "block": "blocked", "release": "todo", "done": "done"}[a.command]
+        owner = claim["actor"] if claim and claim["state"] in ("doing", "blocked") else None
         notes = json.loads(claim["notes"]) if claim else []
         notes.append({"n": len(notes)+1, "action": a.command, "text": text})
         # Claim is durable before touching the issue. A failed mirror is visible
         # on resume and is repaired by repeating the command; never auto-take over.
         with db:
-            db.execute("INSERT OR REPLACE INTO claims VALUES (?,?,?,?,?)", (ref, a.actor, state, plan, json.dumps(notes)))
+            db.execute("INSERT OR REPLACE INTO claims VALUES (?,?,?,?,?)",
+                       (ref, (owner if a.command != "start" else None) or a.actor, state, plan, json.dumps(notes)))
         mirror(repo, bug, b, {"state": state, "actor": a.actor, "notes": json.dumps(notes)})
         return {"ref": ref, "column": state, "actor": a.actor, "recorded": a.command}
 

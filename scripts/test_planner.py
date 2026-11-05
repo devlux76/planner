@@ -95,12 +95,33 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(after["column"],"done")
         self.assertEqual(before["recent"],after["recent"])
 
-    def test_completion_requires_nonempty_evidence_and_current_actor(self):
+    def test_completion_requires_nonempty_evidence_and_any_actor_may_complete(self):
         ref = self.card()
         self.call("start", ref, "--plan", "claim")
         self.call("done", ref, "--evidence", " ", ok=False)
-        self.call("done", ref, "--evidence", "claimed result", actor="other", ok=False)
         self.assertEqual(self.call("show", ref)["column"], "doing")
+        self.call("done", ref, "--evidence", "cooperating actor's result", actor="other")
+        self.assertEqual(self.call("show", ref)["column"], "done")
+
+    def test_any_actor_may_note_without_taking_ownership(self):
+        owned, free = self.card("owned"), self.card("free")
+        self.call("start", owned, "--plan", "claim")
+        out = self.call("note", owned, "review finding: guard removed", actor="codex")
+        self.assertEqual((out["recorded"], out["actor"], out["owner"]), ("note", "codex", "glm"))
+        self.call("note", free, "context for whoever starts this", actor="codex")
+        self.assertEqual(self.call("show", owned)["column"], "doing")
+        self.assertEqual(self.call("show", free)["column"], "todo")
+        resumed = self.call("resume")["cards"]
+        self.assertEqual([c["ref"] for c in resumed], [owned])
+        self.assertEqual(self.call("resume", actor="codex")["cards"], [])
+        comments = self.run_git("bug", "bug", "show", owned.split(":")[1], "-f", "json")
+        self.assertIn("planner note (codex) cooperative: review finding: guard removed", comments)
+        self.call("note", owned, " ", actor="codex", ok=False)
+        self.call("note", owned, "x", actor="bad actor!", ok=False)
+        self.call("done", owned, "--evidence", "codex finished it", actor="codex")
+        self.assertEqual(self.call("show", owned)["column"], "done")
+        self.call("start", free, "--plan", "claim")
+        self.call("start", free, "--plan", "second claim", actor="codex", ok=False)
 
     def test_board_is_bounded_and_closed_work_cannot_restart(self):
         ref = self.card()

@@ -46,6 +46,7 @@ planner show vortex:6ee260f
 planner --actor glm start vortex:6ee260f --plan 'Shorten wake envelopes; verify room and sender boundaries; measure size.'
 planner --actor glm note vortex:6ee260f 'Intent: change the notice text; no mail or service state changes.'
 planner --actor glm note vortex:6ee260f 'Result: focused tests passed; next: size comparison.'
+planner --actor codex note vortex:6ee260f 'Review: any actor may note any card; it adds a comment and never takes ownership or moves the card.'
 planner --actor glm block vortex:6ee260f 'Provider quota exhausted; no retries until operator resumes.'
 planner --actor glm start vortex:6ee260f --plan 'Resume from the recorded checkpoint.'
 planner --actor glm done vortex:6ee260f --evidence 'Actual commands, results, commit, and remaining limits.'
