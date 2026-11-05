@@ -26,9 +26,20 @@ unless s.active == nil and :queue.is_empty(s.queue) and
        :persistent_term.get(key, nil) == nil, do: raise("work or ownership not idle")
 base = String.trim_trailing(Trailblazer.Config.get(:code_model_url), "/v1")
 {:ok, response} = Req.get(base <> "/models")
-unless response.status == 200 and response.body["data"] != [] and
-       Enum.all?(response.body["data"], &(get_in(&1, ["status", "value"]) == "unloaded")),
-       do: raise("model work not idle")
+# The router keeps a model resident after its work (the coder stays loaded
+# between cases), so loaded is not busy: a model is busy when one of its slots
+# is processing, or when its slots cannot be read (still loading, failed).
+idle? = fn id ->
+  case Req.get(base <> "/slots", params: [model: id], retry: false) do
+    {:ok, %{status: 200, body: [_ | _] = slots}} -> not Enum.any?(slots, &(&1["is_processing"] == true))
+    _ -> false
+  end
+end
+busy =
+  for m <- response.body["data"] || [], get_in(m, ["status", "value"]) != "unloaded",
+      not idle?.(m["id"]), do: m["id"]
+unless response.status == 200 and response.body["data"] != [] and busy == [],
+       do: raise("model work not idle: #{inspect(busy)}")
 cap = Trailblazer.Config.get(:code_model_max_tokens)
 unless Trailblazer.Model.valid_reasoning_budget?(__THINKING__, cap),
   do: raise("thinking budget must leave room within configured output cap")
