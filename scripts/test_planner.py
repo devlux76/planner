@@ -123,6 +123,27 @@ class PlannerTest(unittest.TestCase):
         self.call("start", free, "--plan", "claim")
         self.call("start", free, "--plan", "second claim", actor="codex", ok=False)
 
+    def test_peer_updates_work_on_never_claimed_cards(self):
+        for cmd, args, col in (("done", ["--evidence", "checked"], "done"), ("block", ["quota"], "blocked"), ("release", ["handoff"], "todo")):
+            ref = self.card(cmd)
+            self.assertEqual(self.call(cmd, ref, *args, actor="codex")["owner"], "codex")
+            self.assertEqual(self.call("show", ref)["column"], col)
+
+    def test_peer_completion_keeps_owner_and_author_and_is_idempotent(self):
+        ref = self.card()
+        bug = ref.split(":")[1]
+        count = lambda: len(json.loads(self.run_git("bug", "bug", "show", bug, "-f", "json"))["comments"])
+        self.call("start", ref, "--plan", "claim")
+        self.assertEqual(self.call("done", ref, "--evidence", "peer result", actor="codex")["owner"], "glm")
+        before = count()
+        self.call("done", ref, "--evidence", "peer result", actor="codex")
+        self.call("sync", ref)
+        self.assertEqual(count(), before)
+        raw = self.run_git("bug", "bug", "show", bug, "-f", "json")
+        self.assertIn("planner done (codex) #2: peer result", raw)
+        self.assertNotIn("planner done (glm) #2", raw)
+        self.call("sync", ref, actor="codex", ok=False)
+
     def test_board_is_bounded_and_closed_work_cannot_restart(self):
         ref = self.card()
         self.card("another")

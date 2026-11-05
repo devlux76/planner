@@ -61,7 +61,8 @@ def labels(repo, bug, old, state, blocked=False):
 
 def mirror(repo, bug, card, claim):
     note = json.loads(claim["notes"])[-1]
-    text = f'planner {note["action"]} ({claim["actor"]}) #{note["n"]}: {note["text"]}'
+    # The author of each checkpoint is stored with it; the claim's actor is its owner.
+    text = f'planner {note["action"]} ({note.get("by", claim["actor"])}) #{note["n"]}: {note["text"]}'
     if not any(c["message"] == text for c in card["comments"]):
         git(repo, "bug", "comment", "new", bug, "-m", text, "--non-interactive")
     state = claim["state"]
@@ -273,10 +274,11 @@ def main():
             state, plan, text = "doing", a.plan, "plan: "+a.plan
         else:
             text = a.evidence if a.command == "done" else a.text
-            if claim and claim["actor"] == a.actor and a.command in ("done", "block"):
+            if claim and a.command in ("done", "block"):
                 last = json.loads(claim["notes"])[-1]
                 target = "done" if a.command == "done" else "blocked"
-                if claim["state"] == target and last["action"] == a.command and last["text"] == text:
+                if (claim["state"] == target and last["action"] == a.command and last["text"] == text
+                        and last.get("by", claim["actor"]) == a.actor):
                     mirror(repo, bug, b, claim)
                     return {"ref": ref, "column": target, "actor": a.actor, "recorded": "sync"}
             owner = claim["actor"] if claim and claim["state"] in ("doing", "blocked") else None
@@ -295,17 +297,18 @@ def main():
             plan = claim["plan"] if claim else ""
             if not text.strip():
                 raise ValueError("checkpoint, reason or evidence must not be empty")
-            state = {"note": claim["state"], "block": "blocked", "release": "todo", "done": "done"}[a.command]
-        owner = claim["actor"] if claim and claim["state"] in ("doing", "blocked") else None
+            state = claim["state"] if a.command == "note" else {"block": "blocked", "release": "todo", "done": "done"}[a.command]
+        # Start takes ownership; every other update keeps the owner of record.
+        owner = a.actor if a.command == "start" or not claim else claim["actor"]
         notes = json.loads(claim["notes"]) if claim else []
-        notes.append({"n": len(notes)+1, "action": a.command, "text": text})
+        notes.append({"n": len(notes)+1, "action": a.command, "text": text, "by": a.actor})
         # Claim is durable before touching the issue. A failed mirror is visible
         # on resume and is repaired by repeating the command; never auto-take over.
         with db:
             db.execute("INSERT OR REPLACE INTO claims VALUES (?,?,?,?,?)",
-                       (ref, (owner if a.command != "start" else None) or a.actor, state, plan, json.dumps(notes)))
-        mirror(repo, bug, b, {"state": state, "actor": a.actor, "notes": json.dumps(notes)})
-        return {"ref": ref, "column": state, "actor": a.actor, "recorded": a.command}
+                       (ref, owner, state, plan, json.dumps(notes)))
+        mirror(repo, bug, b, {"state": state, "actor": owner, "notes": json.dumps(notes)})
+        return {"ref": ref, "column": state, "actor": a.actor, "owner": owner, "recorded": a.command}
 
 
 if __name__ == "__main__":

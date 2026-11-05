@@ -46,7 +46,8 @@ planner show vortex:6ee260f
 planner --actor glm start vortex:6ee260f --plan 'Shorten wake envelopes; verify room and sender boundaries; measure size.'
 planner --actor glm note vortex:6ee260f 'Intent: change the notice text; no mail or service state changes.'
 planner --actor glm note vortex:6ee260f 'Result: focused tests passed; next: size comparison.'
-planner --actor codex note vortex:6ee260f 'Review: any actor may note any card; it adds a comment and never takes ownership or moves the card.'
+planner --actor codex note vortex:6ee260f 'Peer finding: any actor may note any card (a comment; ownership and column unchanged).'
+planner --actor codex done vortex:6ee260f --evidence 'Peer completion: any actor may block, release or complete; the owner of record is kept and the mirror names the author.'
 planner --actor glm block vortex:6ee260f 'Provider quota exhausted; no retries until operator resumes.'
 planner --actor glm start vortex:6ee260f --plan 'Resume from the recorded checkpoint.'
 planner --actor glm done vortex:6ee260f --evidence 'Actual commands, results, commit, and remaining limits.'
@@ -138,7 +139,7 @@ no previous attempt, an unreleased card, or a previous assignment with a case. A
 timeout alone proves nothing: this flag is not permission to bypass an uncertain
 admission or an open case.
 
-Start with `resume` after compaction. Read one card before acting. Use `git -C <repo> bug bug show <id>` if the bounded card omits needed detail. Work on one active card per actor; block or release it before taking another. A blocker retains task ownership but frees the actor for other work. Select ready work within the operator's authorized scope; priority alone is not permission to revive parked work.
+Start with `resume` after compaction. Read one card before acting. Use `git -C <repo> bug bug show <id>` if the bounded card omits needed detail. Work on one active card per actor; block or release it before taking another. Only `start`/`assign` are exclusive (planner never hands the same task out twice); cooperation is intended: any valid actor may note, block, release or complete any card. Each checkpoint records its author (`by`); the claim keeps its owner of record, and only that owner may `sync`. A blocker retains task ownership but frees the actor for other work. Select ready work within the operator's authorized scope; priority alone is not permission to revive parked work.
 
 Record intent before consequential effects and the observed result afterwards. Include what remains so another session can continue. `done` records verified work; it does **not** close the issue or grant permission to merge, deploy or spend money. Review/closure is separate and need not wait for an unavailable frontier agent.
 
