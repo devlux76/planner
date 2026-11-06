@@ -165,10 +165,15 @@ def main():
         claim = claims.get(ref)
         if a.command == "show":
             comments = b["comments"]
+            # how many times Trailblazer was assigned this card (the current
+            # assignment and those released before it); the board caps retries
+            job = db.execute("SELECT data FROM assignments WHERE ref=?", (ref,)).fetchone()
+            assigned = len(json.loads(job[0]).get("previous", []))+1 if job else 0
             return {"ref": ref, "column": column(b), "title": b["title"], "labels": b["labels"],
                     "body": comments[0]["message"][:1800] if comments else "",
                     "recent": [c["message"][:900] for c in comments[1:][-3:]],
-                    "claim": {**claim, "notes": json.loads(claim["notes"])[-3:]} if claim else None}
+                    "claim": {**claim, "notes": json.loads(claim["notes"])[-3:]} if claim else None,
+                    "assignments": assigned}
         if b["status"] == "closed":
             raise ValueError("closed issue; do not revive old work")
         if a.command == "assign":

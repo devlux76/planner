@@ -287,6 +287,18 @@ elif op in ('read','wait'):
         self.assertEqual(self.assign(ref)["assignment"],first["assignment"])
         self.assertEqual(len((self.root/"sent").read_text().splitlines()),1)
 
+    def test_show_counts_trailblazer_assignments_including_released_ones(self):
+        ref=self.card()
+        self.assertEqual(self.call("show",ref)["assignments"],0)
+        self.dispatch_fixture(ref)
+        self.assign(ref)
+        self.assertEqual(self.call("show",ref)["assignments"],1)
+        with sqlite3.connect(self.root/"state/board.sqlite3") as db:
+            job=json.loads(db.execute("SELECT data FROM assignments WHERE ref=?",(ref,)).fetchone()[0])
+            job["previous"]=[{"id":"earlier","state":"accepted","case":"c1"}]
+            db.execute("UPDATE assignments SET data=? WHERE ref=?",(json.dumps(job),ref))
+        self.assertEqual(self.call("show",ref)["assignments"],2)
+
     def test_explicit_read_budget_reaches_admission_and_cannot_change_on_repeat(self):
         ref=self.card()
         self.dispatch_fixture(ref)
