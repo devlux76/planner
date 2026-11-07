@@ -23,13 +23,21 @@ STATE = Path.home() / ".local/state/planner/trials"
 HOUR_SECONDS = 3600
 POLL_SECONDS = 5
 
+# A running case's worker is stopped; a case still queued in the VORTEX
+# bridge (waiting for the model resource: live 2026-11-06 it never reached
+# the runner and the guard left it open) is closed as cancelled, the way the
+# bridge cancels a caller's request before execution.
 STOP = '''
 id = "__CASE__"
-case :sys.get_state(Trailblazer.Loop.Runner).active do
-  {pid, _ref, ^id} ->
+case {:sys.get_state(Trailblazer.Loop.Runner).active, Trailblazer.Vortex.Store.get(id)} do
+  {{pid, _ref, ^id}, _} ->
     Process.exit(pid, :dispatch_hour_expired)
     Process.sleep(2000)
     if Process.alive?(pid), do: Process.exit(pid, :kill)
+    IO.puts("stopped")
+  {_, %{state: "waiting_resource"}} ->
+    :ok = Trailblazer.Loop.CaseRecord.close(id, %{case: id, status: :cancelled,
+      summary: "Dispatch hour expired before execution: still waiting for the model resource."})
     IO.puts("stopped")
   _ -> IO.puts("not active")
 end
