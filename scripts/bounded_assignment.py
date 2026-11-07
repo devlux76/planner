@@ -10,6 +10,7 @@ import sys
 import uuid
 
 import dispatch_hour
+import postmortem_gate
 import time
 
 ROOT = Path.home() / "projects/trailblazer"
@@ -110,6 +111,7 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
             raise ValueError("worktree must be an existing absolute directory")
         # planner assign checks registration and admission; bind checks the admitted case uses it.
         target = str(path.resolve())
+    postmortem_gate.check(ref)  # no bare relaunch; three post-mortems end the tool runs
     if not CLEANUP.is_file() or not GUARD.is_file():
         raise ValueError("native cleanup observer or dispatch hour guard missing; no admission attempted")
     env = os.environ | {"RELEASE_DISTRIBUTION": "name", "RELEASE_NODE": "trailblazer@127.0.0.1",

@@ -35,6 +35,9 @@ if op=='assign': print((root/'assign-reply').read_text() if (root/'assign-reply'
         watchdog.touch()
         self.guard = root / "guard.py"
         self.guard.touch()
+        gate = patch.object(bounded.postmortem_gate, "check", lambda ref: None)
+        gate.start()
+        self.addCleanup(gate.stop)
         for key, value in {"ROOT": root, "RELEASE": driver, "PLANNER": driver,
                            "SYSTEMD_RUN": driver, "CLEANUP": watchdog, "GUARD": self.guard}.items():
             patcher = patch.object(bounded, key, value)
