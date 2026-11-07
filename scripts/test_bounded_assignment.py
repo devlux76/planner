@@ -7,6 +7,9 @@ import unittest
 from unittest.mock import patch
 
 import bounded_assignment as bounded
+import card_deadline
+import sqlite3
+import time
 
 
 class BoundedAssignmentTest(unittest.TestCase):
@@ -33,10 +36,16 @@ if op=='assign': print((root/'assign-reply').read_text() if (root/'assign-reply'
         watchdog = root / "watchdog.py"
         watchdog.touch()
         for key, value in {"ROOT": root, "RELEASE": driver, "PLANNER": driver,
-                           "SYSTEMD_RUN": driver, "CLEANUP": watchdog}.items():
+                           "SYSTEMD_RUN": driver, "CLEANUP": watchdog, "GUARD": watchdog}.items():
             patcher = patch.object(bounded, key, value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        self.cases = root / "cases.db"
+        with sqlite3.connect(self.cases) as conn:
+            conn.execute("CREATE TABLE task_case (id TEXT, task TEXT, status TEXT, opened_at INTEGER)")
+        patcher = patch.object(card_deadline, "DATABASE", self.cases)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def launch(self):
         return bounded.launch("opencode:1234567", "check", ["a.ts"], 0, 1024)
@@ -60,7 +69,25 @@ if op=='assign': print((root/'assign-reply').read_text() if (root/'assign-reply'
         self.assertNotIn("wall_seconds", result)
         self.assertEqual(result["reasoning_budget_tokens"], 1024)
         self.assertEqual(result["output_cap"], 16384)
-        self.assertEqual(self.events.read_text().splitlines(), ["prepare", "assign", "bind", "--user"])
+        self.assertEqual(self.events.read_text().splitlines(), ["prepare", "assign", "bind", "--user", "--user"])
+        self.assertTrue(result["deadline_unit"].startswith("trailblazer-card-hour-"))
+        self.assertAlmostEqual(result["card_deadline"], time.time() + 3600, delta=60)
+
+    def test_a_card_past_its_hour_is_refused_before_any_profile_or_admission(self):
+        with sqlite3.connect(self.cases) as conn:
+            conn.execute("INSERT INTO task_case VALUES ('vortex-old', 'x bug:1234567 y', 'failed', ?)",
+                         (int((time.time() - 3601) * 1000),))
+        with self.assertRaisesRegex(ValueError, "60-minute card budget"):
+            self.launch()
+        self.assertFalse(self.events.exists())
+
+    def test_a_rerun_keeps_the_first_cases_deadline(self):
+        first = time.time() - 1800
+        with sqlite3.connect(self.cases) as conn:
+            conn.execute("INSERT INTO task_case VALUES ('vortex-old', 'x bug:1234567 y', 'failed', ?)",
+                         (int(first * 1000),))
+            conn.execute("INSERT INTO task_case VALUES ('vortex-other', 'x bug:7654321 y', 'failed', 0)")
+        self.assertAlmostEqual(self.launch()["card_deadline"], first + 3600, delta=1)
 
     def test_confirmation_evidence_is_forwarded_unchanged(self):
         bounded.launch("opencode:1234567", "check", [], 0, 1024,
