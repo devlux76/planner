@@ -9,14 +9,15 @@ import subprocess
 import sys
 import uuid
 
-import card_deadline
+import dispatch_hour
+import time
 
 ROOT = Path.home() / "projects/trailblazer"
 RELEASE = ROOT / "_build/prod/rel/trailblazer/bin/trailblazer"
 PLANNER = Path.home() / ".local/bin/planner"
 SYSTEMD_RUN = "systemd-run"
 CLEANUP = Path(__file__).with_name("case_cleanup.py")
-GUARD = Path(__file__).with_name("card_deadline.py")
+GUARD = Path(__file__).with_name("dispatch_hour.py")
 
 PREPARE = '''
 key = {:trailblazer, :bounded_smoke_profile}
@@ -110,8 +111,7 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
         # planner assign checks registration and admission; bind checks the admitted case uses it.
         target = str(path.resolve())
     if not CLEANUP.is_file() or not GUARD.is_file():
-        raise ValueError("native cleanup observer or card deadline guard missing; no admission attempted")
-    end = card_deadline.deadline(ref)  # refuses a card whose hour is spent, before any profile
+        raise ValueError("native cleanup observer or dispatch hour guard missing; no admission attempted")
     env = os.environ | {"RELEASE_DISTRIBUTION": "name", "RELEASE_NODE": "trailblazer@127.0.0.1",
                         "ERL_EPMD_ADDRESS": "127.0.0.1", "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
                         "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{os.getuid()}/bus"}
@@ -155,15 +155,16 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
     unit = "trailblazer-cleanup-" + case.removeprefix("vortex-")[:12]
     run([str(SYSTEMD_RUN), "--user", "--unit=" + unit, "--collect", "--property=Type=exec",
          sys.executable, str(CLEANUP), case])
-    guard = "trailblazer-card-hour-" + case.removeprefix("vortex-")[:12]
+    end = time.time() + dispatch_hour.HOUR_SECONDS
+    guard = "trailblazer-dispatch-hour-" + case.removeprefix("vortex-")[:12]
     try:
         run([str(SYSTEMD_RUN), "--user", "--unit=" + guard, "--collect", "--property=Type=exec",
              sys.executable, str(GUARD), case, str(end)])
     except BaseException:
         # No guard means no hour cap: stop the case now rather than let it run unbounded.
-        run([str(RELEASE), "rpc", card_deadline.STOP.replace("__CASE__", case)])
+        run([str(RELEASE), "rpc", dispatch_hour.STOP.replace("__CASE__", case)])
         raise
-    return result | {"cleanup_unit": unit, "deadline_unit": guard, "card_deadline": end, "check_interval_seconds": 1800, "output_cap": prepared["output_cap"], "read_rounds": read_rounds, "reasoning_budget_tokens": reasoning_tokens}
+    return result | {"cleanup_unit": unit, "deadline_unit": guard, "stop_at": end, "check_interval_seconds": 1800, "output_cap": prepared["output_cap"], "read_rounds": read_rounds, "reasoning_budget_tokens": reasoning_tokens}
 
 
 if __name__ == "__main__":
