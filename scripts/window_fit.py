@@ -15,6 +15,19 @@ PREFILL_TOK_PER_S = 25        # measured 22-43 on the oneAPI router, lower at lo
 BYTES_PER_TOKEN = 3.0         # source code, numbered lines
 OVERHEAD_TOKENS = 5000        # system prompt, request, trail, check
 MAX_SHARE = 0.5
+# Trailblazer Loop.RangedSource (bug trailblazer:19e1223): a named file over
+# this many lines reaches the coder as header + trail ranges + outline, at most
+# RANGED_LINES shown lines; count it at that share of its bytes (+10% outline).
+RANGED_LINES = 300
+
+
+def file_bytes(path):
+    """Bytes of `path` the coder will read: all of it, or the ranged share."""
+    data = path.read_bytes()
+    lines = data.count(b"\n") + (0 if data.endswith(b"\n") or not data else 1)
+    if lines <= RANGED_LINES:
+        return len(data)
+    return int(len(data) * RANGED_LINES / lines * 1.1)
 
 
 def estimate(worktree, files):
@@ -23,7 +36,7 @@ def estimate(worktree, files):
     for name in files:
         path = Path(worktree) / name
         if path.is_file():
-            size += path.stat().st_size
+            size += file_bytes(path)
     tokens = int(size / BYTES_PER_TOKEN) + OVERHEAD_TOKENS
     return tokens, tokens / PREFILL_TOK_PER_S
 
