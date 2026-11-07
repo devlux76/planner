@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import time
 
 REPOS_FILE = Path.home() / ".config/bug-watch/repos"
 LIMIT = 3
@@ -46,9 +47,16 @@ def messages(ref, repos_file=None):
                 repo = path
     if repo is None:
         raise ValueError(f"unknown repository {name!r}")
-    out = subprocess.run(["git", "-C", str(repo), "bug", "bug", "show", bug, "--format", "json"],
-                         capture_output=True, text=True, check=True, timeout=60).stdout
-    return [c.get("message") or "" for c in json.loads(out)["comments"]]
+    # git-bug holds a repository lock while another planner call writes (live:
+    # a launch right after a note was refused "already locked"); wait it out.
+    for attempt in range(10):
+        run = subprocess.run(["git", "-C", str(repo), "bug", "bug", "show", bug, "--format", "json"],
+                             capture_output=True, text=True, timeout=60)
+        if run.returncode == 0 or "already locked" not in run.stderr or attempt == 9:
+            break
+        time.sleep(0.5)
+    run.check_returncode()
+    return [c.get("message") or "" for c in json.loads(run.stdout)["comments"]]
 
 
 def check(ref, repos_file=None):

@@ -97,6 +97,10 @@ def bind_program(case, owner, read_rounds, reasoning_tokens, replay_reply_from, 
             .replace("__REPLAY__", replay_reply_from or "").replace("__REPO_B64__", encoded))
 
 
+class Refused(ValueError):
+    """Refused before any profile or admission: there is nothing to reconcile."""
+
+
 def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=None, worktree=None,
            confirmed_unadmitted=None):
     if type(read_rounds) is not int or not 0 <= read_rounds <= 6:
@@ -112,8 +116,14 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
             raise ValueError("worktree must be an existing absolute directory")
         # planner assign checks registration and admission; bind checks the admitted case uses it.
         target = str(path.resolve())
-        window_fit.check(target, files)  # a card that cannot fit one window is refused, not run
-    postmortem_gate.check(ref)  # no bare relaunch; three post-mortems end the tool runs
+        try:
+            window_fit.check(target, files)  # a card that cannot fit one window is refused, not run
+        except ValueError as error:
+            raise Refused(str(error)) from error
+    try:
+        postmortem_gate.check(ref)  # no bare relaunch; three post-mortems end the tool runs
+    except ValueError as error:
+        raise Refused(str(error)) from error
     if not CLEANUP.is_file() or not GUARD.is_file():
         raise ValueError("native cleanup observer or dispatch hour guard missing; no admission attempted")
     env = os.environ | {"RELEASE_DISTRIBUTION": "name", "RELEASE_NODE": "trailblazer@127.0.0.1",
@@ -189,6 +199,8 @@ if __name__ == "__main__":
                                 args.replay_reply_from, args.worktree, args.confirmed_unadmitted)))
     except (ValueError, OSError, subprocess.SubprocessError, KeyError) as error:
         detail = error.stderr if isinstance(error, subprocess.CalledProcessError) else str(error)
-        print(json.dumps({"error": "Launch stopped. Reconcile the recorded assignment/profile before retrying.",
+        header = ("Launch refused before admission; nothing to reconcile." if isinstance(error, Refused)
+                  else "Launch stopped. Reconcile the recorded assignment/profile before retrying.")
+        print(json.dumps({"error": header,
                           "detail": detail[-2000:]}), file=sys.stderr)
         sys.exit(1)
