@@ -152,9 +152,6 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
         raise
     print(json.dumps({"admitted_case": case}), file=sys.stderr, flush=True)
     run([str(RELEASE), "rpc", bind_program(case, owner, read_rounds, reasoning_tokens, replay_reply_from, target)])
-    unit = "trailblazer-cleanup-" + case.removeprefix("vortex-")[:12]
-    run([str(SYSTEMD_RUN), "--user", "--unit=" + unit, "--collect", "--property=Type=exec",
-         sys.executable, str(CLEANUP), case])
     end = time.time() + dispatch_hour.HOUR_SECONDS
     guard = "trailblazer-dispatch-hour-" + case.removeprefix("vortex-")[:12]
     try:
@@ -164,6 +161,10 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
         # No guard means no hour cap: stop the case now rather than let it run unbounded.
         run([str(RELEASE), "rpc", dispatch_hour.STOP.replace("__CASE__", case)])
         raise
+    # Guard first: a cleanup unit that fails to start must not leave the case uncapped.
+    unit = "trailblazer-cleanup-" + case.removeprefix("vortex-")[:12]
+    run([str(SYSTEMD_RUN), "--user", "--unit=" + unit, "--collect", "--property=Type=exec",
+         sys.executable, str(CLEANUP), case])
     return result | {"cleanup_unit": unit, "deadline_unit": guard, "stop_at": end, "check_interval_seconds": 1800, "output_cap": prepared["output_cap"], "read_rounds": read_rounds, "reasoning_budget_tokens": reasoning_tokens}
 
 
