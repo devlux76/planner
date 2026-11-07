@@ -33,6 +33,12 @@ class AdmitTest(unittest.TestCase):
         self.assertEqual(peer["compilation"][W], {"old": "tsc", "bash check.sh": "python3 -m py_compile a.py"})
         self.assertNotIn("bash check.sh", peer["compilation"])
 
+    def test_a_blank_compile_command_is_refused(self):
+        before = (self.planner.read_text(), self.vortex.read_text())
+        with self.assertRaises(ValueError):
+            self.admit("bash check.sh", "  ")
+        self.assertEqual(before, (self.planner.read_text(), self.vortex.read_text()))
+
     def test_admitting_twice_changes_nothing(self):
         self.admit("bash check.sh")
         before = (self.planner.read_text(), self.vortex.read_text())

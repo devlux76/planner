@@ -33,7 +33,7 @@ def _check_shape(peer):
         if repo not in repos or not isinstance(policy, dict):
             raise ValueError(f"compilation entry {repo!r} is not a repo of this peer")
         for check, command in policy.items():
-            if check not in repos[repo] or not isinstance(command, str):
+            if check not in repos[repo] or not isinstance(command, str) or not command.strip():
                 raise ValueError(f"compilation[{repo!r}][{check!r}] is not an admitted check")
 
 
@@ -41,6 +41,8 @@ def admit(worktree, check, compile_cmd=None, planner=PLANNER, vortex=VORTEX):
     worktree = str(Path(worktree).expanduser().resolve())
     if not check.strip():
         raise ValueError("empty check")
+    if compile_cmd is not None and not compile_cmd.strip():
+        raise ValueError("empty compile command (Trailblazer refuses the whole VORTEX config)")
     p = json.loads(planner.read_text())
     if worktree not in p.get("repos", {}):
         raise ValueError(f"{worktree} is not a registered planner repo")
@@ -67,8 +69,9 @@ def restart(wait=30):
     subprocess.run(["systemctl", "--user", "restart", "trailblazer"], check=True)
     time.sleep(wait)
     log = subprocess.run(["journalctl", "--user", "-u", "trailblazer", "--since", since, "--no-pager"],
-                         capture_output=True, text=True).stdout
-    if "invalid local vortex configuration" in log:
+                         capture_output=True, text=True, check=True).stdout
+    # Trailblazer logs "invalid local VORTEX configuration" (settings.ex)
+    if "invalid local vortex configuration" in log.lower():
         raise RuntimeError("Trailblazer rejected the VORTEX config after restart")
 
 
