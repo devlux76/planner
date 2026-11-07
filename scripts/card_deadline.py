@@ -37,14 +37,21 @@ end
 
 def card_started_at(ref, database=None):
     """Epoch seconds of the card's first case, or None if it has none yet.
-    A case's request carries the card as bug:<id> (planner assign writes it)."""
+    Planner writes the card only at the end of the request's title line
+    ("<title> bug:<id>"); plan bodies may cite other cards, so only that
+    title tag counts. Either id may be the longer prefix of the other."""
     match = re.fullmatch(r"[a-z0-9_-]+:([0-9a-f]{7,64})", ref)
     if not match:
         raise ValueError("invalid card ref")
+    card = match.group(1)
     with sqlite3.connect(f"file:{database or DATABASE}?mode=ro", uri=True) as conn:
-        row = conn.execute("SELECT min(opened_at) FROM task_case WHERE instr(task, ?) > 0",
-                           ("bug:" + match.group(1),)).fetchone()
-    return None if row[0] is None else row[0] / 1000
+        rows = conn.execute("SELECT opened_at, json_extract(task, '$.request') FROM task_case").fetchall()
+    times = []
+    for opened_at, request in rows:
+        tag = re.search(r" bug:([0-9a-f]{7,64})$", (request or "").split("\n", 1)[0])
+        if tag and (tag.group(1).startswith(card) or card.startswith(tag.group(1))):
+            times.append(opened_at)
+    return min(times) / 1000 if times else None
 
 
 def deadline(ref, now=None, database=None):

@@ -156,8 +156,13 @@ def launch(ref, check, files, read_rounds, reasoning_tokens, replay_reply_from=N
     run([str(SYSTEMD_RUN), "--user", "--unit=" + unit, "--collect", "--property=Type=exec",
          sys.executable, str(CLEANUP), case])
     guard = "trailblazer-card-hour-" + case.removeprefix("vortex-")[:12]
-    run([str(SYSTEMD_RUN), "--user", "--unit=" + guard, "--collect", "--property=Type=exec",
-         sys.executable, str(GUARD), case, str(end)])
+    try:
+        run([str(SYSTEMD_RUN), "--user", "--unit=" + guard, "--collect", "--property=Type=exec",
+             sys.executable, str(GUARD), case, str(end)])
+    except BaseException:
+        # No guard means no hour cap: stop the case now rather than let it run unbounded.
+        run([str(RELEASE), "rpc", card_deadline.STOP.replace("__CASE__", case)])
+        raise
     return result | {"cleanup_unit": unit, "deadline_unit": guard, "card_deadline": end, "check_interval_seconds": 1800, "output_cap": prepared["output_cap"], "read_rounds": read_rounds, "reasoning_budget_tokens": reasoning_tokens}
 
 

@@ -35,8 +35,10 @@ if op=='assign': print((root/'assign-reply').read_text() if (root/'assign-reply'
         driver.chmod(0o700)
         watchdog = root / "watchdog.py"
         watchdog.touch()
+        self.guard = root / "guard.py"
+        self.guard.touch()
         for key, value in {"ROOT": root, "RELEASE": driver, "PLANNER": driver,
-                           "SYSTEMD_RUN": driver, "CLEANUP": watchdog, "GUARD": watchdog}.items():
+                           "SYSTEMD_RUN": driver, "CLEANUP": watchdog, "GUARD": self.guard}.items():
             patcher = patch.object(bounded, key, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -75,8 +77,8 @@ if op=='assign': print((root/'assign-reply').read_text() if (root/'assign-reply'
 
     def test_a_card_past_its_hour_is_refused_before_any_profile_or_admission(self):
         with sqlite3.connect(self.cases) as conn:
-            conn.execute("INSERT INTO task_case VALUES ('vortex-old', 'x bug:1234567 y', 'failed', ?)",
-                         (int((time.time() - 3601) * 1000),))
+            conn.execute("INSERT INTO task_case VALUES ('vortex-old', ?, 'failed', ?)",
+                         (json.dumps({"request": "t bug:1234567\n\nplan"}), int((time.time() - 3601) * 1000)))
         with self.assertRaisesRegex(ValueError, "60-minute card budget"):
             self.launch()
         self.assertFalse(self.events.exists())
@@ -84,10 +86,25 @@ if op=='assign': print((root/'assign-reply').read_text() if (root/'assign-reply'
     def test_a_rerun_keeps_the_first_cases_deadline(self):
         first = time.time() - 1800
         with sqlite3.connect(self.cases) as conn:
-            conn.execute("INSERT INTO task_case VALUES ('vortex-old', 'x bug:1234567 y', 'failed', ?)",
-                         (int(first * 1000),))
-            conn.execute("INSERT INTO task_case VALUES ('vortex-other', 'x bug:7654321 y', 'failed', 0)")
+            conn.execute("INSERT INTO task_case VALUES ('vortex-old', ?, 'failed', ?)",
+                         (json.dumps({"request": "t bug:1234567\n\nplan"}), int(first * 1000)))
+            conn.execute("INSERT INTO task_case VALUES ('vortex-other', ?, 'failed', 0)",
+                         (json.dumps({"request": "t bug:7654321\n\ncites bug:1234567"}),))
         self.assertAlmostEqual(self.launch()["card_deadline"], first + 3600, delta=1)
+
+    def test_a_guard_that_cannot_start_stops_the_case(self):
+        driver = bounded.SYSTEMD_RUN
+        calls = []
+        real = subprocess.run
+        def fake(argv, **kw):
+            calls.append(argv)
+            if any("card_deadline" in str(a) or a == str(self.guard) for a in argv):
+                raise subprocess.CalledProcessError(1, argv)
+            return real(argv, **kw)
+        with patch.object(bounded.subprocess, "run", fake):
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.launch()
+        self.assertIn("Process.exit", calls[-1][-1])
 
     def test_confirmation_evidence_is_forwarded_unchanged(self):
         bounded.launch("opencode:1234567", "check", [], 0, 1024,
