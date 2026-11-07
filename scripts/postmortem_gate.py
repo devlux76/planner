@@ -13,13 +13,14 @@ import subprocess
 
 REPOS_FILE = Path.home() / ".config/bug-watch/repos"
 LIMIT = 3
-CASE = re.compile(r"Result: accepted as case vortex-[0-9a-f]{64}")
+# Anchored to the admission note itself: a post-mortem quoting it is not a case.
+CASE = re.compile(r"^planner \w+ \([^)]*\)[^:]*: Result: accepted as case \S+")
 POSTMORTEM = re.compile(r"^planner note \([^)]*\)[^:]*: Post-mortem", re.IGNORECASE)
 
 
 def counts(messages):
     """(cases, post-mortems) recorded in a card's comments."""
-    cases = sum(1 for m in messages if CASE.search(m))
+    cases = sum(1 for m in messages if CASE.match(m))
     postmortems = sum(1 for m in messages if POSTMORTEM.match(m))
     return cases, postmortems
 

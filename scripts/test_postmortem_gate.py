@@ -23,6 +23,8 @@ class GateTest(unittest.TestCase):
     def test_only_a_note_starting_post_mortem_counts(self):
         self.assertEqual(gate.counts(["planner release (claude) #8: Run 1: post-mortem later"]), (0, 0))
         self.assertEqual(gate.counts(["planner note (claude) cooperative: post-mortem 2: harness"]), (0, 1))
+        quoting = "planner note (claude) cooperative: Post-mortem 1: " + CASE
+        self.assertEqual(gate.counts([quoting]), (0, 1))
 
 
 if __name__ == "__main__":
