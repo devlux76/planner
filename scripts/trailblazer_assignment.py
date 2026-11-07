@@ -62,6 +62,19 @@ def implementation_plan(card):
     raise ValueError("coding assignment needs an Implementation plan: with ordered changes, interfaces and tests; plan or research the card first")
 
 
+def task_request(job):
+    # The coder and reviewer get the card's title and its LATEST plan. A plan
+    # written in a later note supersedes the original body, so that body is
+    # left out (live, vortex:fdf15bf: a stale body asking for a source change
+    # already made made the reviewer fail a correct test-only change twice).
+    # Planner bookkeeping (checkpoints, ownership) is for us, not the coder.
+    card = job["card"]
+    title = card["title"].splitlines()[0][:100]+" bug:"+job["ref"].split(":")[1]
+    if "Implementation plan:" in (card.get("body") or "") and job["plan"] in card["body"]:
+        return title+"\n\n"+card["body"]
+    return title+"\n\nImplementation plan: "+job["plan"]
+
+
 def rpc(config, op, *args, timeout=10):
     try:
         result = subprocess.run(config["vortex_command"]+[op, "--dir", config["vortex_dir"], *args],
@@ -100,11 +113,10 @@ def admit(job, config):
         cursor = page["cursor"]
         if not page.get("events"):
             break
-    request = (job["card"]["title"].splitlines()[0][:100]+" bug:"+job["ref"].split(":")[1]+"\n\n"+
-               job["card"]["body"]+"\n\nCurrent checkpoints:\n"+"\n".join(job["card"]["recent"]))
+    request = task_request(job)
     payload = {"repo":job["repo"], "request":request, "check":job["check"], "files":job["files"],
                "planner":{"ref":job["ref"], "deadline_seconds":job["deadline_seconds"]},
-               "design":["Implementation plan: "+job["plan"], "Current planner card "+job["ref"]+". Elixir owns execution, independent verification, planner updates and recovery. Never merge or push."]}
+               "design":["Implementation plan: "+job["plan"]]}
     if job.get("read_rounds") is not None:
         payload["read_rounds"] = job["read_rounds"]
     if job.get("reasoning_budget_tokens") is not None:

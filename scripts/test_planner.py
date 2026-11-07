@@ -207,6 +207,14 @@ elif op in ('read','wait'):
         return self.call("assign",ref,"trailblazer","--check","test -f value",
                          "--dispatch-config",str(self.config),*extra,actor="codex",ok=ok)
 
+    def test_task_request_uses_latest_plan_not_stale_body(self):
+        import trailblazer_assignment as ta
+        card = {"title": "T", "body": "old: change src and tests"}
+        r = ta.task_request({"card": card, "ref": "x:abc1234", "plan": "add two tests only"})
+        self.assertEqual(r, "T bug:abc1234\n\nImplementation plan: add two tests only")
+        card = {"title": "T", "body": "Implementation plan: do it"}
+        self.assertIn("Implementation plan: do it", ta.task_request({"card": card, "ref": "x:abc1234", "plan": "do it"}))
+
     def test_assignment_refuses_requirements_without_implementation_plan(self):
         ref=self.call("add","repo","--title","unplanned task","--plan","Make fallback work; checks must pass")["ref"]
         self.dispatch_fixture(ref)
