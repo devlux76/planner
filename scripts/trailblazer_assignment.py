@@ -5,6 +5,8 @@ import re
 import subprocess
 import time
 
+import signatures
+
 
 def configuration(path):
     value = json.loads(path.read_text())
@@ -70,9 +72,11 @@ def task_request(job):
     # Planner bookkeeping (checkpoints, ownership) is for us, not the coder.
     card = job["card"]
     title = card["title"].splitlines()[0][:100]+" bug:"+job["ref"].split(":")[1]
+    # the declarations of the repository names the plan uses (signatures.py)
+    facts = signatures.section(job["repo"], job["plan"]) if job.get("repo") else ""
     if "Implementation plan:" in (card.get("body") or "") and job["plan"] in card["body"]:
-        return title+"\n\n"+card["body"]
-    return title+"\n\nImplementation plan: "+job["plan"]
+        return title+"\n\n"+card["body"]+facts
+    return title+"\n\nImplementation plan: "+job["plan"]+facts
 
 
 def rpc(config, op, *args, timeout=10):
