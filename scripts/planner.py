@@ -102,6 +102,7 @@ def main():
     add.add_argument("--title", required=True)
     add.add_argument("--plan", required=True)
     add.add_argument("--priority", choices=["p0", "p1", "p2", "p3"], default="p2")
+    add.add_argument("--label", action="append", default=[], help="an extra label, e.g. dispatch:ready (repeatable)")
     for command in ["show", "start", "note", "block", "release", "done", "sync"]:
         action = sub.add_parser(command)
         action.add_argument("ref", help="repository:bug-id (shared for the cross-repo tracker)")
@@ -151,10 +152,13 @@ def main():
                 raise ValueError("unknown repository")
             if not a.title.strip() or not a.plan.strip():
                 raise ValueError("title and plan must not be empty")
+            for label in a.label:
+                if not label or any(c.isspace() for c in label) or label.startswith(("status:", "kind:", "priority:")):
+                    raise ValueError("invalid label: "+repr(label))
             repo = repos[a.repo]
             result = git(repo, "bug", "new", "-t", a.title, "-m", a.plan, "--non-interactive")
             ref = result.split()[0]
-            git(repo, "bug", "label", "new", ref, "status:todo", "kind:task", "priority:"+a.priority)
+            git(repo, "bug", "label", "new", ref, "status:todo", "kind:task", "priority:"+a.priority, *a.label)
             return {"ref": a.repo+":"+ref, "column": "todo"}
         name, sep, bug = a.ref.partition(":")
         if not sep or name not in repos or not bug:
